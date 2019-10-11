@@ -1,0 +1,15 @@
+artifact_uri: ./mlruns/1/89b165a02457477eba8589e9c016e615/artifacts
+end_time: 1569991532032
+entry_point_name: ''
+experiment_id: '1'
+lifecycle_stage: active
+name: ''
+run_id: 89b165a02457477eba8589e9c016e615
+run_uuid: 89b165a02457477eba8589e9c016e615
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1569991527735
+status: 4
+tags: []
+user_id: nganltp
