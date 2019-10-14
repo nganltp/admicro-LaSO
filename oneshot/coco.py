@@ -66,7 +66,7 @@ def load_paths_multilabels(annotation_file: Path, imgs_base: Path) -> Tuple[list
 class CocoMlDataset(Dataset):
     """Dataset class for the Multilabel COCO dataset
     """
-
+    print('Call funcition: CocoMlDataset() class')
     def __init__(self, image_paths: list, labels: list, transform: transforms.Compose = None,
                  categories_num: int = COCO_LABELS_NUM):
 
