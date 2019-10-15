@@ -5,6 +5,7 @@ import torch
 
 
 class ModelCheckpoint(object):
+    print ('call class ModelCheckpoint')
     """ ModelCheckpoint handler can be used to periodically save objects to disk.
 
     This handler expects two arguments:
@@ -82,7 +83,7 @@ class ModelCheckpoint(object):
                  atomic=True, require_empty=True,
                  create_dir=True,
                  save_as_state_dict=False):
-
+        print ('call __init__ funct of class ModelCheckpoint')
         self._dirname = os.path.expanduser(dirname)
         self._fname_prefix = filename_prefix
         self._n_saved = n_saved
@@ -122,6 +123,7 @@ class ModelCheckpoint(object):
                                  "".format(filename_prefix, dirname))
 
     def _save(self, obj, path):
+        print ('call _save funct of class ModelCheckpoint')
         if not self._atomic:
             self._internal_save(obj, path)
         else:
@@ -137,6 +139,7 @@ class ModelCheckpoint(object):
                 os.rename(tmp.name, path)
 
     def _internal_save(self, obj, path):
+        print ('call _internal_save funct of class ModelCheckpoint')
         if not self._save_as_state_dict:
             torch.save(obj, path)
         else:
@@ -145,6 +148,7 @@ class ModelCheckpoint(object):
             torch.save(obj.state_dict(), path)
 
     def __call__(self, engine, to_save):
+        print ('call __call__ funct of class ModelCheckpoint')
         if len(to_save) == 0:
             raise RuntimeError("No objects to checkpoint found.")
 
