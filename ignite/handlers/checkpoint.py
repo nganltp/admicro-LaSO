@@ -126,7 +126,7 @@ class ModelCheckpoint(object):
         print ('call _save_ funct of class ModelCheckpoint')
         if not self._atomic:
             self._internal_save(obj, path)
-            print('_save path: ' +  path )
+            print('_save path: ',  type(path) )
         else:
             tmp = tempfile.NamedTemporaryFile(delete=False, dir=self._dirname)
             try:
@@ -143,12 +143,12 @@ class ModelCheckpoint(object):
         print ('call _internal_save funct of class ModelCheckpoint')
         if not self._save_as_state_dict:
             torch.save(obj, path)
-            print('_internal_save path: ' +  path )
+            # print('_internal_save path: ', type(path) )
         else:
             if not hasattr(obj, "state_dict") or not callable(obj.state_dict):
                 raise ValueError("Object should have `state_dict` method.")
             torch.save(obj.state_dict(), path)
-            print('_internal_save (state_dict) path: ' +  path )
+            # print('_internal_save (state_dict) path: ' , path )
 
     def __call__(self, engine, to_save):
         print ('call __call__ funct of class ModelCheckpoint')

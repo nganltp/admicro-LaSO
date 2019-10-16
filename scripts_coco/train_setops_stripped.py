@@ -12,7 +12,7 @@ from PIL import Image
 
 import torch
 from torch.utils.data import DataLoader
-from torch.utils.data import Subset
+from torch.utils.data import Subset, SubsetRandomSampler
 from torchvision import transforms
 torch.backends.cudnn.benchmark = True
 
@@ -664,6 +664,7 @@ class Main(MLflowExperiment):
                 'setops_model': setops_model.state_dict(),
             }
         )
+        
         evaluator.add_event_handler(
             event_name=Events.EPOCH_COMPLETED,
             handler=checkpoint_handler_last,
@@ -761,7 +762,6 @@ class Main(MLflowExperiment):
                 )
             ]
         )
-
         train_dataset = CocoDatasetPairs(
             root_dir=self.coco_path,
             set_name='train2014',
@@ -774,24 +774,27 @@ class Main(MLflowExperiment):
             set_name='val2014',
             transform=val_transform,
         )
-
+        sampler = SubsetRandomSampler(range(10))
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            sampler = sampler
         )
         train_subset_loader = DataLoader(
             train_subset_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            samper = sampler
         )
         val_loader = DataLoader(
             val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            sampler = sampler
         )
         return train_loader, train_subset_loader, val_loader
 
