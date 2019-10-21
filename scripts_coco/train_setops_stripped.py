@@ -52,6 +52,11 @@ from traitlets import Bool, Enum, Int, Float, Unicode
 LOG_INTERVAL = 10
 CKPT_PREFIX = 'networks'
 
+if torch.cuda.is_available():
+    DEVICE = torch.device('gpu')
+else:
+    DEVICE = torch.device('cpu')
+
 #
 # Seed the random states
 #
@@ -142,18 +147,33 @@ def create_setops_trainer(
         #
         # Calculate the target setopt operations
         #
-        target_a = target_a.type(torch.cuda.ByteTensor)
-        target_b = target_b.type(torch.cuda.ByteTensor)
+        if torch.cuda.is_available():
+            target_a = target_a.type(torch.cuda.ByteTensor)
+            target_b = target_b.type(torch.cuda.ByteTensor)
 
-        target_a_I_b = target_a & target_b
-        target_a_U_b = target_a | target_b
-        target_a_S_b = target_a & ~target_a_I_b
-        target_b_S_a = target_b & ~target_a_I_b
+            target_a_I_b = target_a & target_b
+            target_a_U_b = target_a | target_b
+            target_a_S_b = target_a & ~target_a_I_b
+            target_b_S_a = target_b & ~target_a_I_b
 
-        target_a_I_b = target_a_I_b.type(torch.cuda.FloatTensor)
-        target_a_U_b = target_a_U_b.type(torch.cuda.FloatTensor)
-        target_a_S_b = target_a_S_b.type(torch.cuda.FloatTensor)
-        target_b_S_a = target_b_S_a.type(torch.cuda.FloatTensor)
+            target_a_I_b = target_a_I_b.type(torch.cuda.FloatTensor)
+            target_a_U_b = target_a_U_b.type(torch.cuda.FloatTensor)
+            target_a_S_b = target_a_S_b.type(torch.cuda.FloatTensor)
+            target_b_S_a = target_b_S_a.type(torch.cuda.FloatTensor)
+        else:
+
+            target_a = target_a.type(torch.ByteTensor)
+            target_b = target_b.type(torch.ByteTensor)
+
+            target_a_I_b = target_a & target_b
+            target_a_U_b = target_a | target_b
+            target_a_S_b = target_a & ~target_a_I_b
+            target_b_S_a = target_b & ~target_a_I_b
+
+            target_a_I_b = target_a_I_b.type(torch.FloatTensor)
+            target_a_U_b = target_a_U_b.type(torch.FloatTensor)
+            target_a_S_b = target_a_S_b.type(torch.FloatTensor)
+            target_b_S_a = target_b_S_a.type(torch.FloatTensor)
 
         loss_class_S = criterion1(a_S_b, target_a_S_b) + criterion1(b_S_a, target_b_S_a)
         loss_class_U = criterion1(a_U_b, target_a_U_b)
@@ -278,18 +298,33 @@ def create_setops_evaluator(
             #
             # Calculate the target setops operations
             #
-            target_a_bt = target_a.type(torch.cuda.ByteTensor)
-            target_b_bt = target_b.type(torch.cuda.ByteTensor)
+            if torch.cuda.is_available():
+                target_a_bt = target_a.type(torch.cuda.ByteTensor)
+                target_b_bt = target_b.type(torch.cuda.ByteTensor)
 
-            target_a_I_b = target_a_bt & target_b_bt
-            target_a_U_b = target_a_bt | target_b_bt
-            target_a_S_b = target_a_bt & ~target_a_I_b
-            target_b_S_a = target_b_bt & ~target_a_I_b
+                target_a_I_b = target_a_bt & target_b_bt
+                target_a_U_b = target_a_bt | target_b_bt
+                target_a_S_b = target_a_bt & ~target_a_I_b
+                target_b_S_a = target_b_bt & ~target_a_I_b
 
-            target_a_I_b = target_a_I_b.type(torch.cuda.FloatTensor)
-            target_a_U_b = target_a_U_b.type(torch.cuda.FloatTensor)
-            target_a_S_b = target_a_S_b.type(torch.cuda.FloatTensor)
-            target_b_S_a = target_b_S_a.type(torch.cuda.FloatTensor)
+                target_a_I_b = target_a_I_b.type(torch.cuda.FloatTensor)
+                target_a_U_b = target_a_U_b.type(torch.cuda.FloatTensor)
+                target_a_S_b = target_a_S_b.type(torch.cuda.FloatTensor)
+                target_b_S_a = target_b_S_a.type(torch.cuda.FloatTensor)
+            else:
+
+                target_a_bt = target_a.type(torch.ByteTensor)
+                target_b_bt = target_b.type(torch.ByteTensor)
+
+                target_a_I_b = target_a_bt & target_b_bt
+                target_a_U_b = target_a_bt | target_b_bt
+                target_a_S_b = target_a_bt & ~target_a_I_b
+                target_b_S_a = target_b_bt & ~target_a_I_b
+
+                target_a_I_b = target_a_I_b.type(torch.FloatTensor)
+                target_a_U_b = target_a_U_b.type(torch.FloatTensor)
+                target_a_S_b = target_a_S_b.type(torch.FloatTensor)
+                target_b_S_a = target_b_S_a.type(torch.FloatTensor)
 
             return dict(
                 outputs={
@@ -350,13 +385,17 @@ class Main(MLflowExperiment):
     ops_latent_dim = Int(8092, config=True, help="Ops Module latent dim.")
     setops_dropout = Float(0, config=True, help="Dropout ratio of setops module.")
     crop_size = Int(224, config=True, help="Size of input crop (Resnet 224, inception 299).")
+    debug_num = Int(-1, config=True)
 
     #
     # Run setup
     #
     batch_size = Int(16, config=True, help="Batch size.")
     num_workers = Int(8, config=True, help="Number of workers to use for data loading.")
-    device = Unicode("cuda", config=True, help="Use `cuda` backend.")
+    if torch.cuda.is_available():
+        device = Unicode("cuda", config=True, help="Use `cuda` backend.")
+    else:
+        device = DEVICE
 
     #
     # Training hyper parameters.
@@ -460,11 +499,13 @@ class Main(MLflowExperiment):
                 lr=self.lr1,
                 weight_decay=self.weight_decay
             )
-
         if self.focal_loss:
-            attr_loss = FocalLoss().cuda()
+            attr_loss = FocalLoss()
         else:
-            attr_loss = torch.nn.MultiLabelSoftMarginLoss().cuda()
+            attr_loss = torch.nn.MultiLabelSoftMarginLoss()
+
+        if torch.cuda.is_available():
+            attr_loss = attr_loss.cuda()
 
         recon_loss = torch.nn.MSELoss() if self.recon_loss == "mse" else torch.nn.L1Loss()
 
@@ -472,13 +513,16 @@ class Main(MLflowExperiment):
         # Setup the trainer object and its logging.
         #
         logging.info("Setup trainer")
+        criterion2 = recon_loss
+        if torch.cuda.is_available():
+            criterion2 = recon_loss.cuda()
         trainer = create_setops_trainer(
             base_model,
             classifier,
             setops_model,
             optimizer,
             criterion1=attr_loss,
-            criterion2=recon_loss.cuda(),
+            criterion2=criterion2,
             params_object=self,
             device=self.device
         )
@@ -496,17 +540,35 @@ class Main(MLflowExperiment):
         # Define the evaluation metrics.
         #
         logging.info("Setup evaluator")
-        evaluation_losses = {
-            'real class loss':
-                Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["real class a"], o["targets"]["class a"])) + \
-                Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["real class b"], o["targets"]["class b"])),
-            'fake class loss':
-                Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["fake class a"], o["targets"]["class a"])) + \
-                Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["fake class b"], o["targets"]["class b"])),
-            '{} fake loss'.format(self.recon_loss):
-                (Loss(recon_loss.cuda(), lambda o: (o["outputs"]["fake embed a"], o["targets"]["embed a"])) +
-                Loss(recon_loss.cuda(), lambda o: (o["outputs"]["fake embed b"], o["targets"]["embed b"]))) / 2,
-        }
+        if torch.cuda.is_available():
+            evaluation_losses = {
+                'real class loss':
+                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["real class a"], o["targets"]["class a"])) + \
+                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["real class b"], o["targets"]["class b"])),
+                'fake class loss':
+                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["fake class a"], o["targets"]["class a"])) + \
+                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["fake class b"], o["targets"]["class b"])),
+                '{} fake loss'.format(self.recon_loss):
+                    (Loss(recon_loss.cuda(), lambda o: (o["outputs"]["fake embed a"], o["targets"]["embed a"])) +
+                    Loss(recon_loss.cuda(), lambda o: (o["outputs"]["fake embed b"], o["targets"]["embed b"]))) / 2,
+            }
+        else:
+
+            evaluation_losses = {
+                'real class loss':
+                    Loss(torch.nn.MultiLabelSoftMarginLoss(),
+                         lambda o: (o["outputs"]["real class a"], o["targets"]["class a"])) + \
+                    Loss(torch.nn.MultiLabelSoftMarginLoss(),
+                         lambda o: (o["outputs"]["real class b"], o["targets"]["class b"])),
+                'fake class loss':
+                    Loss(torch.nn.MultiLabelSoftMarginLoss(),
+                         lambda o: (o["outputs"]["fake class a"], o["targets"]["class a"])) + \
+                    Loss(torch.nn.MultiLabelSoftMarginLoss(),
+                         lambda o: (o["outputs"]["fake class b"], o["targets"]["class b"])),
+                '{} fake loss'.format(self.recon_loss):
+                    (Loss(recon_loss, lambda o: (o["outputs"]["fake embed a"], o["targets"]["embed a"])) +
+                     Loss(recon_loss, lambda o: (o["outputs"]["fake embed b"], o["targets"]["embed b"]))) / 2,
+            }
         labels_list = train_loader.dataset.labels_list
         mask = labels_list_to_1hot(labels_list, labels_list).astype(np.bool)
         evaluation_accuracies = {
@@ -693,7 +755,7 @@ class Main(MLflowExperiment):
             if self.init_inception:
                 logging.info("Initialize inception model using Amit's networks.")
 
-                checkpoint = torch.load(self.resume_path)
+                checkpoint = torch.load(self.resume_path, map_location=DEVICE)
 
                 base_model = Inception3(aux_logits=False, transform_input=True)
                 base_model.load_state_dict(
@@ -720,16 +782,16 @@ class Main(MLflowExperiment):
 
             if self.base_network_name.lower().startswith("resnet"):
                 base_model.load_state_dict(
-                    torch.load(sorted(models_path.glob("networks_base_model_{}*.pth".format(self.resume_epoch)))[-1])
+                    torch.load(sorted(models_path.glob("networks_base_model_{}*.pth".format(self.resume_epoch)))[-1], map_location=DEVICE)
                 )
                 classifier.load_state_dict(
-                    torch.load(sorted(models_path.glob("networks_classifier_{}*.pth".format(self.resume_epoch)))[-1])
+                    torch.load(sorted(models_path.glob("networks_classifier_{}*.pth".format(self.resume_epoch)))[-1], map_location=DEVICE)
                 )
 
             setops_models_paths = sorted(models_path.glob("networks_setops_model_{}*.pth".format(self.resume_epoch)))
             if len(setops_models_paths) > 0:
                 setops_model.load_state_dict(
-                    torch.load(setops_models_paths[-1]).state_dict()
+                    torch.load(setops_models_paths[-1], map_location=DEVICE).state_dict()
                 )
 
         return base_model, classifier, setops_model
@@ -766,19 +828,21 @@ class Main(MLflowExperiment):
             root_dir=self.coco_path,
             set_name='train2014',
             transform=train_transform,
-            dataset_size_ratio=self.dataset_size_ratio
+            dataset_size_ratio=self.dataset_size_ratio,
+            debug_size=self.debug_num
         )
         train_subset_dataset = Subset(train_dataset, range(0, len(train_dataset), 5*self.dataset_size_ratio))
         val_dataset = CocoDatasetPairs(
             root_dir=self.coco_path,
             set_name='val2014',
             transform=val_transform,
+            debug_size=self.debug_num
         )
         sampler = SubsetRandomSampler(range(10))
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=self.num_workers,
             sampler = sampler
         )
@@ -787,7 +851,7 @@ class Main(MLflowExperiment):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            samper = sampler
+            sampler = sampler
         )
         val_loader = DataLoader(
             val_dataset,

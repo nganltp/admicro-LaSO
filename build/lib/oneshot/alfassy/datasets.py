@@ -26,6 +26,7 @@ COCO_CLASS_NUM = 80
 
 def labels_list_to_1hot(labels_list, class_list):
     """Convert a list of indices to 1hot representation."""
+    
 
     labels_1hot = np.zeros(COCO_CLASS_NUM, dtype=np.float32)
 
