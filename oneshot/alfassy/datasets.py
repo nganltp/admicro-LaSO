@@ -16,7 +16,6 @@ from torch.utils.data import Dataset
 from tqdm import trange
 import torchvision.transforms as transforms
 
-
 cuda = True if torch.cuda.is_available() else False
 FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
@@ -163,7 +162,7 @@ class CocoDataset(Dataset):
         #
         coco_annotations = self.coco.loadAnns(annotations_ids)
         labels = [self.category_to_label[ca['category_id']] \
-                       for ca in coco_annotations if ca['bbox'][2] > 0 and ca['bbox'][3] > 0]
+                  for ca in coco_annotations if ca['bbox'][2] > 0 and ca['bbox'][3] > 0]
 
         return sorted(set(labels))
 
@@ -618,7 +617,8 @@ class CocoDatasetTriplets(CocoDatasetPairs):
 class CocoDatasetAugmentation(Dataset):
     """Coco dataset."""
 
-    def __init__(self, root_dir, class_cap, fake_limit, batch_size, used_ind_path, class_ind_dict_path, set_name='train2014', transform=None):
+    def __init__(self, root_dir, class_cap, fake_limit, batch_size, used_ind_path, class_ind_dict_path,
+                 set_name='train2014', transform=None):
         """
         Args:
             root_dir (string): COCO directory.
@@ -690,7 +690,7 @@ class CocoDatasetAugmentation(Dataset):
                 break
         self.fakeVectorsPairs = fakeVectorsPairs
         self.fakeCount = fakeCount
-        batches_num = len(self.usedIndices)/self.batchSize
+        batches_num = len(self.usedIndices) / self.batchSize
         fakeBatchSize = fakeCount / batches_num
         if class_cap == 5:
             fakeBatchSize = int(fakeBatchSize / 4)

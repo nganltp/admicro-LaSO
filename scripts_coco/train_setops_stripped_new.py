@@ -1,9 +1,9 @@
-
 """Train the set-operations models on the COCO dataset.
 
 """
 
 import os
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import logging
 import numpy as np
@@ -14,6 +14,9 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import Subset, SubsetRandomSampler
 from torchvision import transforms
+
+from torch.utils.data import Dataset
+
 torch.backends.cudnn.benchmark = True
 
 from oneshot.coco import copy_coco_data
@@ -45,6 +48,7 @@ from ignite.contrib.handlers import ReduceLROnPlateau
 # from ignite.contrib.handlers import TensorboardLogger
 from ignite._utils import convert_tensor
 
+from tqdm import trange
 from traitlets import Bool, Enum, Int, Float, Unicode
 
 # setupCUDAdevice()
@@ -62,9 +66,138 @@ else:
 #
 np.random.seed(0)
 random_state = np.random.RandomState(0)
+FLAG_CLASS_NUM = 7
 
-#import warnings
-#warnings.filterwarnings("error")
+
+# sumids= 0
+# with open('/home/nganltp/laso/data/flags/train.txt') as f:
+#     sumids = sum(1 for line in f)
+
+# import warnings
+# warnings.filterwarnings("error")
+def load_image(img_path):
+    img = Image.open(img_path)
+
+    if len(np.array(img).shape) == 2:
+        img = img.convert('RGB')
+
+    return img
+
+# def load_labels(path, idx):
+#
+#
+#
+# def read_label(path):
+#
+#
+#     return
+
+
+class FlagDatasetPairs(Dataset):
+
+    def __init__(self, root_dir, set_name, dataset_size_ratio=1):
+        self.root_dir = root_dir
+        self.set_name = set_name
+        self.dataset_size_ratio = dataset_size_ratio
+
+        self.class_histogram = np.zeros(FLAG_CLASS_NUM)
+
+        self.list_id_img = []
+        self.list_label_img = []
+        sum_ids = 0
+        labels = open(os.path.join(self.root_dir, self.set_name, '.txt'), 'r')
+        line = labels.readline()
+        pos_jpg = line.find('.jpg')
+
+        while line:
+
+
+            name_img = line[:pos_jpg]
+            self.list_id_img.append(int(name_img))
+
+            label_img = []
+            label_img_line = line[pos_jpg + 3:]
+            for l in range(len(label_img_line)):
+                if(label_img_line[l] != ' '):
+                    label_img.append(int(label_img_line[l]))
+
+            self.list_label_img.append(label_img)
+            line = labels.readline()
+            sum_ids = sum_ids + 1
+        labels.close()
+
+        logging.info("Calculating indices.")
+        self.images_indices = []
+        for i in trange(self.dataset_size_ratio * sum_ids):  # len(self.image_ids)):
+            self.images_indices.append(self.calc_index(i))
+
+    def __len__(self):
+        return len(self.images_indices)
+
+
+    def calc_index(self, idx):
+        """Calculate a pair of samples for training."""
+
+        while True:
+            #
+            # The first index is select randomly among the labels with the minimum
+            # samples so far.
+            #
+            labels1_list = [0,1,2,6]
+            min_label = np.random.choice(self.labels_list)
+            for ind in range(FLAG_CLASS_NUM):
+                if ind in self.labels_list:
+                    if self.class_histogram[ind] < self.class_histogram[min_label]:
+                        min_label = ind
+
+            tmp_idx = idx % len(self.labels_to_img_ids[min_label])
+            img_id1 = self.labels_to_img_ids[min_label][tmp_idx]
+            labels1 = self.load_labels(img_id1)
+
+            if labels1:
+                break
+
+            idx = np.random.randint(len(self.image_ids))
+
+        labels1 = labels_list_to_1hot(labels1, self.labels_list)
+
+        one_indices = np.where(labels1 == 1)[0]
+        self.class_histogram[one_indices] += 1
+
+        #
+        # The second index is selected from the images that share labels
+        # with the first index, but has minimal sampling so far.
+        #
+        min_label = one_indices[0]
+        for ind in one_indices:
+            if self.class_histogram[ind] < self.class_histogram[min_label]:
+                min_label = ind
+
+        img_id2 = np.random.choice(self.labels_to_img_ids[min_label])
+
+        labels2 = self.load_labels(img_id2)
+        labels2 = labels_list_to_1hot(labels2, self.list_label_img)
+
+        one_indices = np.where(labels2 == 1)[0]
+        self.class_histogram[one_indices] += 1
+
+        return self.image_id_to_path(img_id1), self.image_id_to_path(img_id2), labels1, labels2, img_id1, img_id2
+
+    def __getitem__(self, idx):
+
+        path1, path2, labels1, labels2, id1, id2 = self.images_indices[idx]
+
+        img1 = load_image(path1)
+        img2 = load_image(path2)
+
+        if self.transform:
+            img1 = self.transform(img1)
+            img2 = self.transform(img2)
+
+        if self.return_ids:
+            return img1, img2, labels1, labels2, id1, id2
+
+        return img1, img2, labels1, labels2
 
 
 def _prepare_batch(batch, device=None):
@@ -130,7 +263,7 @@ def create_setops_trainer(
         fake_a, fake_b, a_S_b, b_S_a, a_U_b, b_U_a, a_I_b, b_I_a, \
         a_S_b_b, b_S_a_a, a_I_b_b, b_I_a_a, a_U_b_b, b_U_a_a, \
         a_S_b_I_a, b_S_a_I_b, a_S_a_I_b, b_S_b_I_a = \
-                    [classifier(o) for o in outputs_setopt]
+            [classifier(o) for o in outputs_setopt]
         fake_a_em, fake_b_em, a_S_b_em, b_S_a_em, a_U_b_em, b_U_a_em, a_I_b_em, b_I_a_em, \
         a_S_b_b_em, b_S_a_a_em, a_I_b_b_em, b_I_a_a_em, a_U_b_b_em, b_U_a_a_em, \
         a_S_b_I_a_em, b_S_a_I_b_em, a_S_a_I_b_em, b_S_b_I_a_em = outputs_setopt
@@ -180,7 +313,7 @@ def create_setops_trainer(
         loss_class_I = criterion1(a_I_b, target_a_I_b)
         if params_object.tautology_class_toggle:
             loss_class_S += criterion1(a_S_b_b, target_a_S_b) + criterion1(b_S_a_a, target_b_S_a)
-            loss_class_S += criterion1(a_S_a_I_b, target_a_S_b) + criterion1(b_S_a_I_b, target_b_S_a) +\
+            loss_class_S += criterion1(a_S_a_I_b, target_a_S_b) + criterion1(b_S_a_I_b, target_b_S_a) + \
                             criterion1(b_S_b_I_a, target_b_S_a) + criterion1(a_S_b_I_a, target_a_S_b)
             loss_class_U += criterion1(a_U_b_b, target_a_U_b) + criterion1(b_U_a_a, target_a_U_b)
             loss_class_I += criterion1(a_I_b_b, target_a_I_b) + criterion1(b_I_a_a, target_a_I_b)
@@ -212,13 +345,17 @@ def create_setops_trainer(
 
         loss = loss_class
         loss += 0 if params_object.class_fake_loss_weight == 0 else params_object.class_fake_loss_weight * loss_class_out
-        loss += 0 if (params_object.recon_loss_weight == 0) or (not loss_recon) else params_object.recon_loss_weight * loss_recon
+        loss += 0 if (params_object.recon_loss_weight == 0) or (
+            not loss_recon) else params_object.recon_loss_weight * loss_recon
         loss += 0 if params_object.class_S_loss_weight == 0 else params_object.class_S_loss_weight * loss_class_S
-        loss += 0 if (params_object.recon_loss_weight == 0) or (not loss_recon_I) else params_object.recon_loss_weight * loss_recon_S
+        loss += 0 if (params_object.recon_loss_weight == 0) or (
+            not loss_recon_I) else params_object.recon_loss_weight * loss_recon_S
         loss += 0 if params_object.class_U_loss_weight == 0 else params_object.class_U_loss_weight * loss_class_U
-        loss += 0 if (params_object.recon_loss_weight == 0) or (not loss_recon_U) else params_object.recon_loss_weight * loss_recon_U
+        loss += 0 if (params_object.recon_loss_weight == 0) or (
+            not loss_recon_U) else params_object.recon_loss_weight * loss_recon_U
         loss += 0 if params_object.class_I_loss_weight == 0 else params_object.class_I_loss_weight * loss_class_I
-        loss += 0 if (params_object.recon_loss_weight == 0) or (not loss_recon_I) else params_object.recon_loss_weight * loss_recon_I
+        loss += 0 if (params_object.recon_loss_weight == 0) or (
+            not loss_recon_I) else params_object.recon_loss_weight * loss_recon_I
 
         loss.backward()
         optimizer.step()
@@ -365,7 +502,8 @@ class Main(MLflowExperiment):
     #
     # Resume previous run parameters.
     #
-    resume_path = Unicode(u"/dccstor/faceid/results/train_coco_resnet/0198_968f3cd/1174695/190117_081837/", config=True, help="Resume from checkpoint file (requires using also '--resume_epoch'.")
+    resume_path = Unicode(u"/dccstor/faceid/results/train_coco_resnet/0198_968f3cd/1174695/190117_081837/", config=True,
+                          help="Resume from checkpoint file (requires using also '--resume_epoch'.")
     resume_epoch = Int(49, config=True, help="Epoch to resume (requires using also '--resume_path'.")
     coco_path = Unicode(u"/tmp/aa/coco", config=True, help="path to local coco dataset path")
     init_inception = Bool(False, config=True, help="Initialize the inception networks using ALFASSY's network.")
@@ -543,14 +681,18 @@ class Main(MLflowExperiment):
         if torch.cuda.is_available():
             evaluation_losses = {
                 'real class loss':
-                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["real class a"], o["targets"]["class a"])) + \
-                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["real class b"], o["targets"]["class b"])),
+                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(),
+                         lambda o: (o["outputs"]["real class a"], o["targets"]["class a"])) + \
+                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(),
+                         lambda o: (o["outputs"]["real class b"], o["targets"]["class b"])),
                 'fake class loss':
-                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["fake class a"], o["targets"]["class a"])) + \
-                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(), lambda o: (o["outputs"]["fake class b"], o["targets"]["class b"])),
+                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(),
+                         lambda o: (o["outputs"]["fake class a"], o["targets"]["class a"])) + \
+                    Loss(torch.nn.MultiLabelSoftMarginLoss().cuda(),
+                         lambda o: (o["outputs"]["fake class b"], o["targets"]["class b"])),
                 '{} fake loss'.format(self.recon_loss):
                     (Loss(recon_loss.cuda(), lambda o: (o["outputs"]["fake embed a"], o["targets"]["embed a"])) +
-                    Loss(recon_loss.cuda(), lambda o: (o["outputs"]["fake embed b"], o["targets"]["embed b"]))) / 2,
+                     Loss(recon_loss.cuda(), lambda o: (o["outputs"]["fake embed b"], o["targets"]["embed b"]))) / 2,
             }
         else:
 
@@ -574,22 +716,27 @@ class Main(MLflowExperiment):
         evaluation_accuracies = {
             'real class acc':
                 (MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["real class a"], o["targets"]["class a"])) +
-                MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["real class b"], o["targets"]["class b"]))) / 2,
+                 MultiLabelSoftMarginIOUaccuracy(
+                     lambda o: (o["outputs"]["real class b"], o["targets"]["class b"]))) / 2,
             'fake class acc':
                 (MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["fake class a"], o["targets"]["class a"])) +
-                MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["fake class b"], o["targets"]["class b"]))) / 2,
+                 MultiLabelSoftMarginIOUaccuracy(
+                     lambda o: (o["outputs"]["fake class b"], o["targets"]["class b"]))) / 2,
             'S class acc':
                 (MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["a_S_b class"], o["targets"]["a_S_b class"])) +
-                MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["b_S_a class"], o["targets"]["b_S_a class"]))) / 2,
+                 MultiLabelSoftMarginIOUaccuracy(
+                     lambda o: (o["outputs"]["b_S_a class"], o["targets"]["b_S_a class"]))) / 2,
             'I class acc':
                 (MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["a_I_b class"], o["targets"]["a_I_b class"])) +
-                MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["b_I_a class"], o["targets"]["a_I_b class"]))) / 2,
+                 MultiLabelSoftMarginIOUaccuracy(
+                     lambda o: (o["outputs"]["b_I_a class"], o["targets"]["a_I_b class"]))) / 2,
             'U class acc':
                 (MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["a_U_b class"], o["targets"]["a_U_b class"])) +
-                MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["b_U_a class"], o["targets"]["a_U_b class"]))) / 2,
+                 MultiLabelSoftMarginIOUaccuracy(
+                     lambda o: (o["outputs"]["b_U_a class"], o["targets"]["a_U_b class"]))) / 2,
             'MSE fake acc':
                 (EWMeanSquaredError(lambda o: (o["outputs"]["fake embed a"], o["targets"]["embed a"])) +
-                EWMeanSquaredError(lambda o: (o["outputs"]["fake embed b"], o["targets"]["embed b"]))) / 2,
+                 EWMeanSquaredError(lambda o: (o["outputs"]["fake embed b"], o["targets"]["embed b"]))) / 2,
             'real mAP': mAP(mask=mask,
                             output_transform=lambda o: (o["outputs"]["real class a"], o["targets"]["class a"])),
             'fake mAP': mAP(mask=mask,
@@ -620,7 +767,6 @@ class Main(MLflowExperiment):
             metric_names=list(evaluation_accuracies.keys())
         )
         ProgressBar(bar_format=None).attach(train_evaluator)
-
 
         #
         # Setup the evaluator object and its logging.
@@ -663,7 +809,7 @@ class Main(MLflowExperiment):
         scheduler_2 = ReduceLROnPlateau(
             optimizer,
             factor=0.5,
-            patience=4*len(train_loader),
+            patience=4 * len(train_loader),
             cooldown=len(train_loader),
             output_transform=lambda x: x["main"]
         )
@@ -726,7 +872,7 @@ class Main(MLflowExperiment):
                 'setops_model': setops_model.state_dict(),
             }
         )
-        
+
         evaluator.add_event_handler(
             event_name=Events.EPOCH_COMPLETED,
             handler=checkpoint_handler_last,
@@ -778,14 +924,16 @@ class Main(MLflowExperiment):
         if self.resume_path:
             logging.info("Resuming the models.")
             models_path = Path(self.resume_path)
-            #print('models_path: ' + models_path)
+            # print('models_path: ' + models_path)
 
             if self.base_network_name.lower().startswith("resnet"):
                 base_model.load_state_dict(
-                    torch.load(sorted(models_path.glob("networks_base_model_{}*.pth".format(self.resume_epoch)))[-1], map_location=DEVICE)
+                    torch.load(sorted(models_path.glob("networks_base_model_{}*.pth".format(self.resume_epoch)))[-1],
+                               map_location=DEVICE)
                 )
                 classifier.load_state_dict(
-                    torch.load(sorted(models_path.glob("networks_classifier_{}*.pth".format(self.resume_epoch)))[-1], map_location=DEVICE)
+                    torch.load(sorted(models_path.glob("networks_classifier_{}*.pth".format(self.resume_epoch)))[-1],
+                               map_location=DEVICE)
                 )
 
             setops_models_paths = sorted(models_path.glob("networks_setops_model_{}*.pth".format(self.resume_epoch)))
@@ -796,7 +944,9 @@ class Main(MLflowExperiment):
 
         return base_model, classifier, setops_model
 
-    def setup_datasets2(self):
+    def setup_datasets(self):
+        """Load the training datasets."""
+
         train_transform = transforms.Compose(
             [
                 transforms.Resize(self.crop_size),
@@ -823,51 +973,20 @@ class Main(MLflowExperiment):
             ]
         )
 
-
-
-    def setup_datasets(self):
-        """Load the training datasets."""
-
-        train_transform = transforms.Compose(
-            [
-                transforms.Resize(self.crop_size),
-                transforms.RandomRotation(degrees=self.random_angle, resample=Image.BILINEAR),
-                transforms.RandomResizedCrop(
-                    size=self.crop_size, scale=(1-self.random_scale, 1+self.random_scale), ratio=(1, 1)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225]
-                )
-            ]
-        )
-        val_transform = transforms.Compose(
-            [
-                transforms.Resize(self.crop_size),
-                transforms.CenterCrop(self.crop_size),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225]
-                )
-            ]
-        )
-
-
-        train_dataset = CocoDatasetPairs(
-            root_dir=self.coco_path,
-            set_name='train2014',
-            transform=train_transform,
-            dataset_size_ratio=self.dataset_size_ratio,
-            debug_size=self.debug_num
-        )
-        train_subset_dataset = Subset(train_dataset, range(0, len(train_dataset), 5*self.dataset_size_ratio))
+        # train_dataset = CocoDatasetPairs(
+        #     root_dir=self.coco_path,
+        #     set_name='train',
+        #     transform=train_transform,
+        #     dataset_size_ratio=self.dataset_size_ratio,
+        #     # debug_size=self.debug_num
+        # )
+        train_dataset = FlagDatasetPairs(root_dir=self.coco_path, set_name='train')
+        train_subset_dataset = Subset(train_dataset, range(0, len(train_dataset), 5 * self.dataset_size_ratio))
         val_dataset = CocoDatasetPairs(
             root_dir=self.coco_path,
-            set_name='val2014',
+            set_name='val',
             transform=val_transform,
-            debug_size=self.debug_num
+            # debug_size=self.debug_num
         )
         sampler = SubsetRandomSampler(range(10))
         train_loader = DataLoader(
@@ -875,23 +994,24 @@ class Main(MLflowExperiment):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            sampler = sampler
+            sampler=sampler
         )
         train_subset_loader = DataLoader(
             train_subset_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            sampler = sampler
+            sampler=sampler
         )
         val_loader = DataLoader(
             val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            sampler = sampler
+            sampler=sampler
         )
         return train_loader, train_subset_loader, val_loader
+
 
 if __name__ == "__main__":
     main = Main()
