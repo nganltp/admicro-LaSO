@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Subset, SubsetRandomSampler
 from torchvision import transforms
 
+from collections import defaultdict
 from torch.utils.data import Dataset
 
 torch.backends.cudnn.benchmark = True
@@ -83,6 +84,7 @@ def load_image(img_path):
 
     return img
 
+
 # def load_labels(path, idx):
 #
 #
@@ -95,45 +97,53 @@ def load_image(img_path):
 
 class FlagDatasetPairs(Dataset):
 
-    def __init__(self, root_dir, set_name, dataset_size_ratio=1):
+    def __init__(self, root_dir, set_name, dataset_size_ratio=1, transform=None):
         self.root_dir = root_dir
         self.set_name = set_name
         self.dataset_size_ratio = dataset_size_ratio
 
         self.class_histogram = np.zeros(FLAG_CLASS_NUM)
+        self.transform = transform
 
         self.list_id_img = []
         self.list_label_img = []
+        self.labels_to_img_ids = defaultdict(list)
+        self.id_img_to_labels = {}
+
         sum_ids = 0
         labels = open(os.path.join(self.root_dir, self.set_name, '.txt'), 'r')
         line = labels.readline()
         pos_jpg = line.find('.jpg')
 
         while line:
+            name_img = int(line[:pos_jpg])
+            self.list_id_img.append(name_img)
 
-
-            name_img = line[:pos_jpg]
-            self.list_id_img.append(int(name_img))
-
-            label_img = []
             label_img_line = line[pos_jpg + 3:]
-            for l in range(len(label_img_line)):
-                if(label_img_line[l] != ' '):
-                    label_img.append(int(label_img_line[l]))
+            label_img = np.array(map(int, label_img_line.split(" ")))
 
             self.list_label_img.append(label_img)
+            label_img_int = np.where(label_img == 1)
+            for label in label_img_int:
+                self.labels_to_img_ids[label].append(name_img)
+            self.id_img_to_labels[name_img] = label_img_int
+
             line = labels.readline()
             sum_ids = sum_ids + 1
         labels.close()
+
+        self.labels_list = list(range(FLAG_CLASS_NUM))
 
         logging.info("Calculating indices.")
         self.images_indices = []
         for i in trange(self.dataset_size_ratio * sum_ids):  # len(self.image_ids)):
             self.images_indices.append(self.calc_index(i))
 
+    def get_path(self, idx):
+        return os.path.join(self.root_dir, self.set_name, idx + ".jpg")
+
     def __len__(self):
         return len(self.images_indices)
-
 
     def calc_index(self, idx):
         """Calculate a pair of samples for training."""
@@ -143,7 +153,7 @@ class FlagDatasetPairs(Dataset):
             # The first index is select randomly among the labels with the minimum
             # samples so far.
             #
-            labels1_list = [0,1,2,6]
+            labels1_list = [0, 1, 2, 6]
             min_label = np.random.choice(self.labels_list)
             for ind in range(FLAG_CLASS_NUM):
                 if ind in self.labels_list:
@@ -152,12 +162,12 @@ class FlagDatasetPairs(Dataset):
 
             tmp_idx = idx % len(self.labels_to_img_ids[min_label])
             img_id1 = self.labels_to_img_ids[min_label][tmp_idx]
-            labels1 = self.load_labels(img_id1)
+            labels1 = self.id_img_to_labels[img_id1]
 
             if labels1:
                 break
 
-            idx = np.random.randint(len(self.image_ids))
+            idx = np.random.randint(len(self.list_id_img))
 
         labels1 = labels_list_to_1hot(labels1, self.labels_list)
 
@@ -175,13 +185,13 @@ class FlagDatasetPairs(Dataset):
 
         img_id2 = np.random.choice(self.labels_to_img_ids[min_label])
 
-        labels2 = self.load_labels(img_id2)
+        labels2 = self.id_img_to_labels[img_id2]
         labels2 = labels_list_to_1hot(labels2, self.list_label_img)
 
         one_indices = np.where(labels2 == 1)[0]
         self.class_histogram[one_indices] += 1
 
-        return self.image_id_to_path(img_id1), self.image_id_to_path(img_id2), labels1, labels2, img_id1, img_id2
+        return self.get_path(img_id1), self.get_path(img_id2), labels1, labels2, img_id1, img_id2
 
     def __getitem__(self, idx):
 
@@ -193,9 +203,6 @@ class FlagDatasetPairs(Dataset):
         if self.transform:
             img1 = self.transform(img1)
             img2 = self.transform(img2)
-
-        if self.return_ids:
-            return img1, img2, labels1, labels2, id1, id2
 
         return img1, img2, labels1, labels2
 
@@ -214,26 +221,15 @@ def create_setops_trainer(
         params_object,
         metrics={},
         device=None):
-    """
-    Factory function for creating a trainer for supervised models
 
-    Args:
-        model (`torch.nn.Module`): the model to train
-        optimizer (`torch.optim.Optimizer`): the optimizer to use
-        loss_fn (torch.nn loss function): the loss function to use
-        device (str, optional): device type specification (default: None).
-            Applies to both model and batches.
 
-    Returns:
-        Engine: a trainer engine with supervised update function
-    """
     if device:
         base_model.to(device)
         classifier.to(device)
         setops_model.to(device)
 
-    def _update(engine, batch):
 
+    def _update(engine, batch):
         if params_object.train_base:
             base_model.train()
         else:
@@ -372,6 +368,7 @@ def create_setops_trainer(
             "U class": loss_class_U.item(),
             "I class": loss_class_I.item()
         }
+
 
     engine = Engine(_update)
 
@@ -980,9 +977,9 @@ class Main(MLflowExperiment):
         #     dataset_size_ratio=self.dataset_size_ratio,
         #     # debug_size=self.debug_num
         # )
-        train_dataset = FlagDatasetPairs(root_dir=self.coco_path, set_name='train')
+        train_dataset = FlagDatasetPairs(root_dir=self.coco_path, set_name='train', transform=train_transform)
         train_subset_dataset = Subset(train_dataset, range(0, len(train_dataset), 5 * self.dataset_size_ratio))
-        val_dataset = CocoDatasetPairs(
+        val_dataset = FlagDatasetPairs(
             root_dir=self.coco_path,
             set_name='val',
             transform=val_transform,
