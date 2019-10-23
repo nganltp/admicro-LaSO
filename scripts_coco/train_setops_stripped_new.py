@@ -111,22 +111,22 @@ class FlagDatasetPairs(Dataset):
         self.id_img_to_labels = {}
 
         sum_ids = 0
-        labels = open(os.path.join(self.root_dir, self.set_name, '.txt'), 'r')
+        labels = open(os.path.join(self.root_dir, self.set_name + '.txt'), 'r')
         line = labels.readline()
         pos_jpg = line.find('.jpg')
 
         while line:
-            name_img = int(line[:pos_jpg])
+            name_img = line[:pos_jpg]
             self.list_id_img.append(name_img)
 
-            label_img_line = line[pos_jpg + 3:]
-            label_img = np.array(map(int, label_img_line.split(" ")))
+            label_img_line = line[pos_jpg + 5:]
+            label_img = np.array(list(map(int, label_img_line.split(" "))))
 
             self.list_label_img.append(label_img)
-            label_img_int = np.where(label_img == 1)
+            label_img_int = np.where(label_img == 1)[0]
             for label in label_img_int:
                 self.labels_to_img_ids[label].append(name_img)
-            self.id_img_to_labels[name_img] = label_img_int
+            self.id_img_to_labels[name_img] = label_img
 
             line = labels.readline()
             sum_ids = sum_ids + 1
@@ -140,7 +140,7 @@ class FlagDatasetPairs(Dataset):
             self.images_indices.append(self.calc_index(i))
 
     def get_path(self, idx):
-        return os.path.join(self.root_dir, self.set_name, idx + ".jpg")
+        return os.path.join(self.root_dir, "images", self.set_name, str(idx) + ".jpg")
 
     def __len__(self):
         return len(self.images_indices)
@@ -153,7 +153,6 @@ class FlagDatasetPairs(Dataset):
             # The first index is select randomly among the labels with the minimum
             # samples so far.
             #
-            labels1_list = [0, 1, 2, 6]
             min_label = np.random.choice(self.labels_list)
             for ind in range(FLAG_CLASS_NUM):
                 if ind in self.labels_list:
@@ -164,12 +163,10 @@ class FlagDatasetPairs(Dataset):
             img_id1 = self.labels_to_img_ids[min_label][tmp_idx]
             labels1 = self.id_img_to_labels[img_id1]
 
-            if labels1:
+            if labels1 is not None:
                 break
 
             idx = np.random.randint(len(self.list_id_img))
-
-        labels1 = labels_list_to_1hot(labels1, self.labels_list)
 
         one_indices = np.where(labels1 == 1)[0]
         self.class_histogram[one_indices] += 1
@@ -186,7 +183,6 @@ class FlagDatasetPairs(Dataset):
         img_id2 = np.random.choice(self.labels_to_img_ids[min_label])
 
         labels2 = self.id_img_to_labels[img_id2]
-        labels2 = labels_list_to_1hot(labels2, self.list_label_img)
 
         one_indices = np.where(labels2 == 1)[0]
         self.class_histogram[one_indices] += 1
@@ -221,13 +217,10 @@ def create_setops_trainer(
         params_object,
         metrics={},
         device=None):
-
-
     if device:
         base_model.to(device)
         classifier.to(device)
         setops_model.to(device)
-
 
     def _update(engine, batch):
         if params_object.train_base:
@@ -368,7 +361,6 @@ def create_setops_trainer(
             "U class": loss_class_U.item(),
             "I class": loss_class_I.item()
         }
-
 
     engine = Engine(_update)
 
@@ -888,12 +880,12 @@ class Main(MLflowExperiment):
         logging.info("{} model".format(self.base_network_name))
         if self.base_network_name.lower().startswith("resnet"):
             base_model, classifier = getattr(setops_models, self.base_network_name)(
-                num_classes=80,
+                num_classes=FLAG_CLASS_NUM,
                 avgpool_kernel=self.avgpool_kernel
             )
         else:
             base_model = getattr(setops_models, self.base_network_name)()
-            classifier = getattr(setops_models, self.classifier_name)(num_classes=80)
+            classifier = getattr(setops_models, self.classifier_name)(num_classes=FLAG_CLASS_NUM)
 
             if self.init_inception:
                 logging.info("Initialize inception model using Amit's networks.")
