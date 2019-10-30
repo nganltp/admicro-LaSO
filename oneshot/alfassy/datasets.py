@@ -23,10 +23,10 @@ LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 COCO_CLASS_NUM = 80
 
 
-def labels_list_to_1hot(labels_list, class_list):
+def labels_list_to_1hot(labels_list, class_list, class_num=COCO_CLASS_NUM):
     """Convert a list of indices to 1hot representation."""
 
-    labels_1hot = np.zeros(COCO_CLASS_NUM, dtype=np.float32)
+    labels_1hot = np.zeros(class_num, dtype=np.float32)
 
     labels_1hot[list(filter(lambda x: x in class_list, labels_list))] = 1
     assert labels_1hot.sum() > 0, "No labels in conversion of labels list to 1hot"

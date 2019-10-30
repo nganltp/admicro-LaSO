@@ -107,10 +107,31 @@ class FlagDatasetPairs(Dataset):
 
         self.list_id_img = []
         self.list_label_img = []
-        self.labels_to_img_ids = defaultdict(list)
         self.id_img_to_labels = {}
 
+        self.labels_to_img_ids = None
+        self.labels_list = None
+
+        logging.info("Calculating indices.")
+        self.images_indices = None
+
+        self.calc_indices()
+
+    def get_path(self, idx):
+        return os.path.join(self.root_dir, "images", self.set_name, str(idx) + ".jpg")
+
+    def __len__(self):
+        return len(self.images_indices)
+
+    def calc_indices(self):
         sum_ids = 0
+
+        self.class_histogram = np.zeros(FLAG_CLASS_NUM)
+        self.labels_to_img_ids = defaultdict(list)
+        self.list_id_img = []
+        self.id_img_to_labels = {}
+
+        self.list_label_img = []
         labels = open(os.path.join(self.root_dir, self.set_name + '.txt'), 'r')
         line = labels.readline()
         pos_jpg = line.find('.jpg')
@@ -138,12 +159,6 @@ class FlagDatasetPairs(Dataset):
         self.images_indices = []
         for i in trange(self.dataset_size_ratio * sum_ids):  # len(self.image_ids)):
             self.images_indices.append(self.calc_index(i))
-
-    def get_path(self, idx):
-        return os.path.join(self.root_dir, "images", self.set_name, str(idx) + ".jpg")
-
-    def __len__(self):
-        return len(self.images_indices)
 
     def calc_index(self, idx):
         """Calculate a pair of samples for training."""
@@ -187,7 +202,8 @@ class FlagDatasetPairs(Dataset):
         one_indices = np.where(labels2 == 1)[0]
         self.class_histogram[one_indices] += 1
 
-        return self.get_path(img_id1), self.get_path(img_id2), labels1, labels2, img_id1, img_id2
+        return self.get_path(img_id1), self.get_path(img_id2), labels1.astype(np.float32), labels2.astype(
+            np.float32), img_id1, img_id2
 
     def __getitem__(self, idx):
 
@@ -444,7 +460,10 @@ def create_setops_evaluator(
 
                 target_a_I_b = target_a_bt & target_b_bt
                 target_a_U_b = target_a_bt | target_b_bt
+                # This all 0 case cannot happen unless target_b = a
                 target_a_S_b = target_a_bt & ~target_a_I_b
+                # if target_a_S_b.sum() == 0:
+                #     print("Problem found")
                 target_b_S_a = target_b_bt & ~target_a_I_b
 
                 target_a_I_b = target_a_I_b.type(torch.FloatTensor)
@@ -512,7 +531,6 @@ class Main(MLflowExperiment):
     ops_latent_dim = Int(8092, config=True, help="Ops Module latent dim.")
     setops_dropout = Float(0, config=True, help="Dropout ratio of setops module.")
     crop_size = Int(224, config=True, help="Size of input crop (Resnet 224, inception 299).")
-    debug_num = Int(-1, config=True)
 
     #
     # Run setup
@@ -554,6 +572,7 @@ class Main(MLflowExperiment):
     tautology_recon_toggle = Bool(True, config=True, help="Should we use tautology reconstruction loss?")
     tautology_class_toggle = Bool(True, config=True, help="Should we use tautology classification loss?")
     dataset_size_ratio = Int(4, config=True, help="Multiplier of training dataset.").tag(parameter=True)
+    debug_size = Int(-1, config=True)
 
     def run(self):
         # TODO: comment out if you don't want to copy coco to /tmp/aa
@@ -701,7 +720,7 @@ class Main(MLflowExperiment):
                      Loss(recon_loss, lambda o: (o["outputs"]["fake embed b"], o["targets"]["embed b"]))) / 2,
             }
         labels_list = train_loader.dataset.labels_list
-        mask = labels_list_to_1hot(labels_list, labels_list).astype(np.bool)
+        mask = labels_list_to_1hot(labels_list, labels_list, FLAG_CLASS_NUM).astype(np.bool)
         evaluation_accuracies = {
             'real class acc':
                 (MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["real class a"], o["targets"]["class a"])) +
@@ -712,6 +731,7 @@ class Main(MLflowExperiment):
                  MultiLabelSoftMarginIOUaccuracy(
                      lambda o: (o["outputs"]["fake class b"], o["targets"]["class b"]))) / 2,
             'S class acc':
+            # Here, debug this
                 (MultiLabelSoftMarginIOUaccuracy(lambda o: (o["outputs"]["a_S_b class"], o["targets"]["a_S_b class"])) +
                  MultiLabelSoftMarginIOUaccuracy(
                      lambda o: (o["outputs"]["b_S_a class"], o["targets"]["b_S_a class"]))) / 2,
@@ -971,17 +991,21 @@ class Main(MLflowExperiment):
         # )
         train_dataset = FlagDatasetPairs(root_dir=self.coco_path, set_name='train', transform=train_transform)
         train_subset_dataset = Subset(train_dataset, range(0, len(train_dataset), 5 * self.dataset_size_ratio))
+
         val_dataset = FlagDatasetPairs(
             root_dir=self.coco_path,
             set_name='val',
             transform=val_transform,
             # debug_size=self.debug_num
         )
-        sampler = SubsetRandomSampler(range(10))
+        if self.debug_size == -1:
+            sampler = None
+        else:
+            sampler = SubsetRandomSampler(range(self.debug_size))
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
-            shuffle=False,
+            shuffle=self.debug_size == -1,
             num_workers=self.num_workers,
             sampler=sampler
         )
