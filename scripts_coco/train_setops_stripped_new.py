@@ -982,13 +982,6 @@ class Main(MLflowExperiment):
             ]
         )
 
-        # train_dataset = CocoDatasetPairs(
-        #     root_dir=self.coco_path,
-        #     set_name='train',
-        #     transform=train_transform,
-        #     dataset_size_ratio=self.dataset_size_ratio,
-        #     # debug_size=self.debug_num
-        # )
         train_dataset = FlagDatasetPairs(root_dir=self.coco_path, set_name='train', transform=train_transform)
         train_subset_dataset = Subset(train_dataset, range(0, len(train_dataset), 5 * self.dataset_size_ratio))
 
@@ -996,7 +989,6 @@ class Main(MLflowExperiment):
             root_dir=self.coco_path,
             set_name='val',
             transform=val_transform,
-            # debug_size=self.debug_num
         )
         if self.debug_size == -1:
             sampler = None
