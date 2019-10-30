@@ -58,7 +58,7 @@ LOG_INTERVAL = 10
 CKPT_PREFIX = 'networks'
 
 if torch.cuda.is_available():
-    DEVICE = torch.device('gpu')
+    DEVICE = torch.device('cuda')
 else:
     DEVICE = torch.device('cpu')
 
