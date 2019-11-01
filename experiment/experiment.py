@@ -75,7 +75,7 @@ class Experiment(Application):
     strict_git = Bool(False, config=True,
                       help="Force (by fail running) that all code changes are committed before execution.")
 
-    results_path = Unicode(help="Base path for experiment results.")
+    # results_path = Unicode(help="Base path for experiment results.")
 
     def _results_path_default(self):
 
@@ -224,7 +224,11 @@ class Experiment(Application):
 
     def _setup_logging(self):
         """Setup logging of experiment."""
-
+        self.results_path = createResultFolder(
+            base_path=self.results_path,
+            strict_git=self.strict_git,
+            time_struct=self.exp_time
+        )
         setupLogging(self.results_path, log_level=self.log_level, custom_handlers=self.custom_log_handlers)
 
         logging.info("Created results path: {}".format(self.results_path))

@@ -27,12 +27,12 @@ from oneshot.coco import copy_coco_data
 
 from experiment import Experiment
 
-from CCC import setupCUDAdevice
+# from CCC import setupCUDAdevice
 
 from ignite._utils import convert_tensor
 
 
-setupCUDAdevice()
+# setupCUDAdevice()
 
 cuda = True if torch.cuda.is_available() else False
 device = 'cuda'

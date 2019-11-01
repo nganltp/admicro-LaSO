@@ -571,6 +571,8 @@ class Main(MLflowExperiment):
     mc_toggle = Bool(True, config=True, help="Should we use anti mode collapse loss?")
     tautology_recon_toggle = Bool(True, config=True, help="Should we use tautology reconstruction loss?")
     tautology_class_toggle = Bool(True, config=True, help="Should we use tautology classification loss?")
+
+    results_path = Unicode("", config=True, help="Base path for experiment results.")
     dataset_size_ratio = Int(4, config=True, help="Multiplier of training dataset.").tag(parameter=True)
     debug_size = Int(-1, config=True)
 
@@ -1016,6 +1018,7 @@ class Main(MLflowExperiment):
             sampler=sampler
         )
         return train_loader, train_subset_loader, val_loader
+
 
 
 if __name__ == "__main__":

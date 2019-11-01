@@ -85,6 +85,8 @@ class Main(Experiment):
     embedding_dim = Int(2048, config=True, help="Dimensionality of the LaSO space. default:2048")
     classifier_latent_dim = Int(2048, config=True, help="Dimensionality of the classifier latent space. default:2048")
 
+    results_path = Unicode("", config=True, help="Base path for experiment results.")
+
     def run(self):
 
         #
