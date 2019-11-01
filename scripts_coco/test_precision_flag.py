@@ -31,6 +31,7 @@ from ignite._utils import convert_tensor
 from traitlets import Bool, Float, Int, Unicode
 
 #setupCUDAdevice()
+from scripts_coco.train_setops_stripped_new import FlagDatasetPairs
 
 if torch.cuda.is_available():
     DEVICE = torch.device('cuda')
@@ -334,12 +335,10 @@ class Main(Experiment):
                 )
             ]
         )
-        pair_dataset = CocoDatasetPairs(
+        pair_dataset = FlagDatasetPairs(
             root_dir=self.coco_path,
-            set_name='val2014',
-            unseen_set=self.unseen,
+            set_name='val',
             transform=val_transform,
-            debug_size=self.debug_size
         )
 
         pair_loader = DataLoader(
@@ -348,12 +347,10 @@ class Main(Experiment):
             shuffle=False,
             num_workers=self.num_workers
         )
-        pair_dataset_sub = CocoDatasetPairsSub(
+        pair_dataset_sub = FlagDatasetPairs(
             root_dir=self.coco_path,
-            set_name='val2014',
-            unseen_set=self.unseen,
+            set_name='val',
             transform=val_transform,
-            debug_size=self.debug_size
         )
 
         pair_loader_sub = DataLoader(
