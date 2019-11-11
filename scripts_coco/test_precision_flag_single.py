@@ -3,13 +3,17 @@
 import logging
 import os
 # os.environ['CUDA_VISIBLE_DEVICES'] = "1"
+import shutil
+from collections import defaultdict
+from shutil import copyfile
 
+from torch.utils.data import Dataset
 import numpy as np
 from pathlib import Path
 import pickle
 from tqdm import tqdm
 
-from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import precision_recall_curve, recall_score
 from sklearn.metrics import average_precision_score
 
 import torch
@@ -21,18 +25,17 @@ from oneshot import alfassy
 from oneshot.coco import copy_coco_data
 
 from experiment import Experiment
-from sklearn.metrics import recall_score
 
-#from CCC import setupCUDAdevice
+# from CCC import setupCUDAdevice
 
-#setupCUDAdevice()
+# setupCUDAdevice()
 
 from ignite._utils import convert_tensor
 
 from traitlets import Bool, Float, Int, Unicode
 
-#setupCUDAdevice()
-from scripts_coco.train_setops_stripped_new import FlagDatasetPairs
+# setupCUDAdevice()
+from scripts_coco.train_setops_stripped_new import FlagDatasetPairs, FLAG_CLASS_NUM, load_image
 
 if torch.cuda.is_available():
     DEVICE = torch.device('cuda')
@@ -44,8 +47,88 @@ def _prepare_batch(batch, device=None):
     return [convert_tensor(x, device=device) for x in batch]
 
 
-class Main(Experiment):
+class FlagDataset(Dataset):
 
+    def __init__(self, root_dir, set_name, dataset_size_ratio=1, transform=None):
+        self.root_dir = root_dir
+        self.set_name = set_name
+        self.dataset_size_ratio = dataset_size_ratio
+
+        self.class_histogram = np.zeros(FLAG_CLASS_NUM)
+        self.transform = transform
+
+        self.list_id_img = []
+        self.list_label_img = []
+        self.id_img_to_labels = {}
+
+        self.labels_to_img_ids = None
+        self.labels_list = None
+
+        logging.info("Calculating indices.")
+        self.images_indices = None
+
+        self.calc_indices()
+
+    def get_path(self, idx):
+        return os.path.join(self.root_dir, "images", self.set_name, self.get_img_name(idx))
+
+    def __len__(self):
+        return len(self.images_indices)
+
+    def calc_indices(self):
+        sum_ids = 0
+
+        self.class_histogram = np.zeros(FLAG_CLASS_NUM)
+        self.list_id_img = []
+        self.id_img_to_labels = {}
+
+        self.list_label_img = []
+        labels = open(os.path.join(self.root_dir, self.set_name + '.txt'), 'r')
+        line = labels.readline()
+        pos_jpg = line.find('.jpg')
+        self.images_indices = []
+        self.labels_to_img_ids = defaultdict(list)
+        while line:
+            name_img = line[:pos_jpg]
+            self.list_id_img.append(name_img)
+
+            label_img_line = line[pos_jpg + 5:]
+            label_img = np.array(list(map(int, label_img_line.split(" "))))
+
+            self.list_label_img.append(label_img)
+
+            line = labels.readline()
+            self.images_indices.append((name_img, self.get_path(name_img), label_img))
+            # for label_int in self.get_label_int(label_img):
+            #     self.labels_to_img_ids[label_int].append(name_img)
+        labels.close()
+
+        self.labels_list = list(range(FLAG_CLASS_NUM))
+
+    def __getitem__(self, idx):
+        name_img, path, labels = self.images_indices[idx]
+        img = load_image(path)
+        if self.transform:
+            img = self.transform(img)
+        return name_img, img, labels
+
+    def get_label_int(self, label_img):
+        return np.where(label_img == 1)
+
+    def get_img_name(self, name_img):
+        return str(name_img) + ".jpg"
+
+    def copy_label(self, label_int: int, target_folder):
+        for name_img in self.labels_to_img_ids[label_int]:
+            fr = self.get_path(name_img)
+            to = os.path.join(target_folder,self.get_img_name(name_img))
+
+            logging.info("Copying {} to {}".format(fr, to))
+            shutil.copyfile(fr,to)
+
+
+
+class Main(Experiment):
     description = Unicode(u"Calculate precision-recall accuracy of trained coco model.")
 
     #
@@ -63,12 +146,14 @@ class Main(Experiment):
     #
     unseen = Bool(False, config=True, help="Test on unseen classes.")
     skip_tests = Int(1, config=True, help="How many test pairs to skip? for better runtime. default: 1")
-    debug_size = Int(-1, config=True, help="Reduce dataset sizes. This is useful when developing the script. default -1")
+    debug_size = Int(-1, config=True,
+                     help="Reduce dataset sizes. This is useful when developing the script. default -1")
 
     #
     # Resume previous run parameters.
     #
-    resume_path = Unicode(u"/dccstor/alfassy/finalLaSO/code_release/paperModels", config=True, help="Resume from checkpoint file (requires using also '--resume_epoch'.")
+    resume_path = Unicode(u"/dccstor/alfassy/finalLaSO/code_release/paperModels", config=True,
+                          help="Resume from checkpoint file (requires using also '--resume_epoch'.")
     resume_epoch = Int(0, config=True, help="Epoch to resume (requires using also '--resume_path'.")
     coco_path = Unicode(u"/tmp/aa/coco", config=True, help="path to local coco dataset path")
     init_inception = Bool(True, config=True, help="Initialize the inception networks using the paper's base network.")
@@ -116,126 +201,92 @@ class Main(Experiment):
         #
         # Load the dataset
         #
-        pair_dataset, pair_loader, pair_dataset_sub, pair_loader_sub = self.setup_datasets()
-
+        # pair_dataset, pair_loader, pair_dataset_sub, pair_loader_sub = self.setup_datasets()
+        dataset = self.setup_datasets()
 
         logging.info("Calcualting classifications:")
-        output_a_list, output_b_list, fake_a_list, fake_b_list, target_a_list, target_b_list = [], [], [], [], [], []
-        a_S_b_list, b_S_a_list, a_U_b_list, b_U_a_list, a_I_b_list, b_I_a_list = [], [], [], [], [], []
-        target_a_I_b_list, target_a_U_b_list, target_a_S_b_list, target_b_S_a_list = [], [], [], []
+        output_list = []
+        target_list = []
+        copy_folder_target = "/home/nganltp/laso/data/flags/images/false/"
+        total_false = 0
+        # predict_file = open("/home/nganltp/laso/data/flags/images/predict.txt", mode='w+')
+        TP = np.zeros(7)
+        FN = np.zeros(7)
+        FP = np.zeros(7)
+        TN = np.zeros(7)
         with torch.no_grad():
-            for batch in tqdm(pair_loader):
-                input_a, input_b, target_a, target_b = _prepare_batch(batch, device=self.device)
-
+            for name_img, inp, target in tqdm(dataset):
+                inp = inp.unsqueeze(0)
+                target = torch.tensor(target).to(DEVICE)
+                target = target.unsqueeze(0)
                 #
                 # Apply the classification model
                 #
-                embed_a = base_model(input_a).view(input_a.size(0), -1)
-                embed_b = base_model(input_b).view(input_b.size(0), -1)
-                output_a = classifier(embed_a)
-                output_b = classifier(embed_b)
-
+                embed = base_model(inp).view(inp.size(0), -1)
+                output = classifier(embed)
                 #
                 # Apply the setops model.
                 #
-                outputs_setopt = setops_model(embed_a, embed_b)
-                a_S_b, b_S_a, a_U_b, b_U_a, a_I_b, b_I_a = \
-                    [classifier(o) for o in outputs_setopt[2:8]]
 
-                output_a_list.append(output_a.cpu().numpy())
-                output_b_list.append(output_b.cpu().numpy())
-                # fake_a_list.append(fake_a.cpu().numpy())
-                # fake_b_list.append(fake_b.cpu().numpy())
-                a_S_b_list.append(a_S_b.cpu().numpy())
-                b_S_a_list.append(b_S_a.cpu().numpy())
-                a_U_b_list.append(a_U_b.cpu().numpy())
-                b_U_a_list.append(b_U_a.cpu().numpy())
-                a_I_b_list.append(a_I_b.cpu().numpy())
-                b_I_a_list.append(b_I_a.cpu().numpy())
+                output_list.append(output.cpu().numpy())
 
+                sig_out = (torch.sigmoid(output) > 0.5).int()
+                # logging.info("Image {}, label {}, predicted {}".format(name_img, target, sig_out))
                 #
                 # Calculate the target setops operations
                 #
-                target_a_list.append(target_a.cpu().numpy())
-                target_b_list.append(target_b.cpu().numpy())
+                target_list.append(target.cpu().numpy())
+                sig_out = sig_out.squeeze(0)
+                v_target=target[0]
+# ------------------------------confusion matrix--------------------------------------------
+                for lab in range(7):
+                    if v_target[lab] == 1 and sig_out[lab] == 1:
+                        TP[lab] += 1
 
-                target_a = target_a.type(torch.cuda.ByteTensor)
-                target_b = target_b.type(torch.cuda.ByteTensor)
+                    if v_target[lab] == 1 and sig_out[lab] == 0:
+                        FN[lab] += 1
 
-                target_a_I_b = target_a & target_b
-                target_a_U_b = target_a | target_b
-                target_a_S_b = target_a & ~target_a_I_b
-                target_b_S_a = target_b & ~target_a_I_b
+                    if v_target[lab] == 0 and sig_out[lab] == 1:
+                        FP[lab] += 1
 
-                target_a_I_b_list.append(target_a_I_b.type(torch.cuda.FloatTensor).cpu().numpy())
-                target_a_U_b_list.append(target_a_U_b.type(torch.cuda.FloatTensor).cpu().numpy())
-                target_a_S_b_list.append(target_a_S_b.type(torch.cuda.FloatTensor).cpu().numpy())
-                target_b_S_a_list.append(target_b_S_a.type(torch.cuda.FloatTensor).cpu().numpy())
+                    if v_target[lab] == 0 and sig_out[lab] == 0:
+                        TN[lab] += 1
 
-        logging.info("Calculating classifications for subtraction independently:")
-        a_S_b_list, b_S_a_list = [], []
-        target_a_S_b_list, target_b_S_a_list = [], []
-        with torch.no_grad():
-            for batch in tqdm(pair_loader_sub):
-                input_a, input_b, target_a, target_b = _prepare_batch(batch, device=self.device)
+                logging.info('TP: {}, FN: {}, FP: {}, TN: {}'.format(TP, FN, FP, TN))
+# ------------------------------------------------------------------------------------------
+                # if torch.sum(target) == 0 and (sig_out[1] == 1):#or sig_out[5] == 1 or sig_out[6] == 1):
+                # logging.info('type target {}, sig_out {}'.format(type(target), type(sig_out)))
+                # if ((target[0][1] == 0) and (sig_out[1] == 1)) or ((target[0][1] == 1) and (sig_out[1] == 0)):
+                # org_path = dataset.get_path(name_img)
+                # copyfile(org_path, copy_folder_target + str(name_img) + "_" + str(sig_out) + "_" + ".jpg")
+                # total_false += 1
+                # logging.info("Image {}, label {}, predicted {}".format(name_img, target, sig_out))
+                # predict_file.write('Image: ' + str(name_img) + ', target: ' + str(target) + ',predicted: ' + str(sig_out) + '\n')
 
-                #
-                # Apply the classification model
-                #
-                embed_a = base_model(input_a).view(input_a.size(0), -1)
-                embed_b = base_model(input_b).view(input_b.size(0), -1)
-                #
-                # Apply the setops model.
-                #
-                outputs_setopt = setops_model(embed_a, embed_b)
-                a_S_b, b_S_a, _, _, _, _ = \
-                    [classifier(o) for o in outputs_setopt[2:8]]
+        logging.info("Total false {}".format(total_false))
+        output = np.array(output_list).squeeze(1)
+        target = np.array(target_list).squeeze(1)
 
-                a_S_b_list.append(a_S_b.cpu().numpy())
-                b_S_a_list.append(b_S_a.cpu().numpy())
-
-                #
-                # Calculate the target setops operations
-                #
-                target_a = target_a.type(torch.cuda.ByteTensor)
-                target_b = target_b.type(torch.cuda.ByteTensor)
-
-                target_a_I_b = target_a & target_b
-                target_a_S_b = target_a & ~target_a_I_b
-                target_b_S_a = target_b & ~target_a_I_b
-                target_a_S_b_list.append(target_a_S_b.type(torch.cuda.FloatTensor).cpu().numpy())
-                target_b_S_a_list.append(target_b_S_a.type(torch.cuda.FloatTensor).cpu().numpy())
-
-        #
-        # Output restuls
-        #
-        logging.info("Calculating precision:")
-        for output, target, name in tqdm(zip(
-                (output_a_list, output_b_list, a_S_b_list, b_S_a_list, a_U_b_list, b_U_a_list, a_I_b_list, b_I_a_list),
-                (target_a_list, target_b_list, target_a_S_b_list, target_b_S_a_list, target_a_U_b_list,
-                 target_a_U_b_list, target_a_I_b_list, target_a_I_b_list),
-                ("real_a", "real_b", "a_S_b", "b_S_a", "a_U_b", "b_U_a", "a_I_b", "b_I_a"))):
-
-            output = np.concatenate(output, axis=0)
-
-            target = np.concatenate(target, axis=0)
-
-            ap = [average_precision_score(target[:, i], output[:, i]) for i in range(output.shape[1])]
-
-            pr_graphs = [precision_recall_curve(target[:, i], output[:, i]) for i in range(output.shape[1])]
-            ap_sum = 0
-            # logging.info('class precision {}'.format(ap))
-            for label in pair_dataset.labels_list:
-
-                ap_sum += ap[label]
-            ap_avg = ap_sum / len(pair_dataset.labels_list)
-            logging.info(
-                'Test {} average precision score, macro-averaged over all {} classes: {}'.format(
-                    name, len(pair_dataset.labels_list), ap_avg)
-            )
-
-            with open(os.path.join(self.results_path, "{}_results.pkl".format(name)), "wb") as f:
-                pickle.dump(dict(ap=ap, pr_graphs=pr_graphs), f)
+        ap = [average_precision_score(target[:, i], output[:, i]) for i in range(output.shape[1])]
+        # recall = [recall_score(target[:, i], output[:, i] ) for i in range(output.shape[1])]
+        pr_graphs = [precision_recall_curve(target[:, i], output[:, i]) for i in range(output.shape[1])]
+        ap_sum = 0
+        recall_sum = 0
+        logging.info('class precision {}'.format(ap))
+        # logging.info('class recall{}'.format(recall))
+        for label in dataset.labels_list:
+            ap_sum += ap[label]
+            # recall_sum += recall[label]
+        ap_avg = ap_sum / len(dataset.labels_list)
+        # recall_avg = recall_sum / len(dataset.labels_list)
+        logging.info(
+            'Test {} average precision score, macro-averaged over all {} classes: {}'.format(
+                "Single Image test score", len(dataset.labels_list), ap_avg)
+        )
+        # logging.info(
+        #     'Test {} average recall score, macro-averaged over all {} classes: {}'.format(
+        #         "Single Image test score", len(dataset.labels_list), recall_avg)
+        # )
 
     def setup_model(self, num_classes=80):
         """Create or resume the models."""
@@ -287,7 +338,8 @@ class Main(Experiment):
         logging.info("Resuming the models.")
         if not self.init_inception:
             base_model.load_state_dict(
-                torch.load(sorted(models_path.glob("networks_base_model_{}*.pth".format(self.resume_epoch)))[-1],  map_location=DEVICE)
+                torch.load(sorted(models_path.glob("networks_base_model_{}*.pth".format(self.resume_epoch)))[-1],
+                           map_location=DEVICE)
             )
 
         if self.paper_reproduce:
@@ -303,7 +355,7 @@ class Main(Experiment):
                     sorted(
                         models_path.glob("networks_setops_model_{}*.pth".format(self.resume_epoch))
                     )[-1]
-                , map_location=DEVICE)
+                    , map_location=DEVICE)
             )
             if self.unseen:
                 classifier.load_state_dict(
@@ -311,7 +363,8 @@ class Main(Experiment):
                 )
             elif not self.init_inception:
                 classifier.load_state_dict(
-                    torch.load(sorted(models_path.glob("networks_classifier_{}*.pth".format(self.resume_epoch)))[-1], map_location=DEVICE)
+                    torch.load(sorted(models_path.glob("networks_classifier_{}*.pth".format(self.resume_epoch)))[-1],
+                               map_location=DEVICE)
                 )
 
         return base_model, classifier, setops_model
@@ -322,8 +375,6 @@ class Main(Experiment):
         # copy_coco_data()
 
         logging.info("Setting up the datasets.")
-        CocoDatasetPairs = getattr(alfassy, "CocoDatasetPairs")
-        CocoDatasetPairsSub = getattr(alfassy, "CocoDatasetPairsSub")
         if self.paper_reproduce:
             logging.info("Setting up the datasets and augmentation for paper reproduction")
             scaler = transforms.Scale((350, 350))
@@ -341,32 +392,32 @@ class Main(Experiment):
                 )
             ]
         )
-        pair_dataset = FlagDatasetPairs(
+        load_dataset = FlagDataset(
             root_dir=self.coco_path,
             set_name='val',
             transform=val_transform,
         )
 
-        pair_loader = DataLoader(
-            pair_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers
-        )
-        pair_dataset_sub = FlagDatasetPairs(
-            root_dir=self.coco_path,
-            set_name='val',
-            transform=val_transform,
-        )
+        # pair_loader = DataLoader(
+        #     pair_dataset,
+        #     batch_size=self.batch_size,
+        #     shuffle=False,
+        #     num_workers=self.num_workers
+        # )
+        # pair_dataset_sub = FlagDatasetPairs(
+        #     root_dir=self.coco_path,
+        #     set_name='val',
+        #     transform=val_transform,
+        # )
+        #
+        # pair_loader_sub = DataLoader(
+        #     pair_dataset_sub,
+        #     batch_size=self.batch_size,
+        #     shuffle=False,
+        #     num_workers=self.num_workers
+        # )
 
-        pair_loader_sub = DataLoader(
-            pair_dataset_sub,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers
-        )
-
-        return pair_dataset, pair_loader, pair_dataset_sub, pair_loader_sub
+        return load_dataset
 
 
 if __name__ == "__main__":

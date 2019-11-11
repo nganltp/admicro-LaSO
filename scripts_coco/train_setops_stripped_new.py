@@ -67,7 +67,7 @@ else:
 #
 np.random.seed(0)
 random_state = np.random.RandomState(0)
-FLAG_CLASS_NUM = 7
+FLAG_CLASS_NUM = 5
 
 
 # sumids= 0
